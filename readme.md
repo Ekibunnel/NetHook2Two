@@ -1,7 +1,10 @@
 ## NetHook2Two
+<img width="1345" height="852" alt="image" src="https://github.com/user-attachments/assets/9cd8f32c-9671-4405-862a-9598c60592ec" />
 
 NetHook2Two is a Windows DLL that is injected into the address space of a running Steam.exe process (or `steamcmd.exe`,
 `srcds.exe`...), hooks the networking routines of the Steam client and shows every network message it sends or receives.
+
+This whole thing is basically an Imgui windows strapped to already existing tools from [Steamkit](https://github.com/SteamRE/SteamKit), **ALL credits go to them**.
 
 This version bundles what used to be three separate tools into one:
 
@@ -41,6 +44,7 @@ This version bundles what used to be three separate tools into one:
 Closing the window ejects NetHook2Two from the process.
 
 ### Adding more protobuf definitions
+#### You can find up to date `.proto` at [SteamTracking/Protobufs](https://github.com/SteamTracking/Protobufs).
 
 Game coordinator (GC) messages are defined by the games, not by Steam. To see them parsed, give NetHook2Two the
 definitions - plain `.proto` files work, no `protoc` needed:
@@ -115,3 +119,7 @@ NetHook requires the Microsoft Visual C++ Redistributable for your architecture
 
 Unless switched off (*View > Also write dump files to disk*), packets are still written to `nethook/<timestamp>` inside
 the Steam folder exactly as before, so NetHookAnalyzer2 can keep being used on them.
+
+## License
+
+NetHook2Two is a fork of [Steamkit](https://github.com/SteamRE/SteamKit) and so is under the [LGPL-2.1 license](https://choosealicense.com/licenses/lgpl-2.1/).
