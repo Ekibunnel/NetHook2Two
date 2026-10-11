@@ -1,0 +1,3 @@
+syntax = "proto2";
+enum ELooseMsgs { k_EMsgGCLoose = 5001; }
+message CMsgGCLoose { optional bool ok = 1; }

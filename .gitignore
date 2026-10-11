@@ -1,6 +1,3 @@
-# Test coverage
-/SteamKit2/Tests/Coverage/
-
 # Build Folders (you can keep bin if you'd like, to store dlls and pdbs)
 [Bb]in/
 [Oo]bj/
@@ -119,4 +116,9 @@ Thumbs.db
 .DS_Store
 
 # Vcpkg
-Resources/NetHook2/NetHook2/vcpkg_installed
+NetHook2Two/vcpkg_installed
+
+# Test
+tests/*.pb.cc
+tests/*.pb.h
+tests/test.desc

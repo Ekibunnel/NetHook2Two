@@ -1,0 +1,17 @@
+syntax = "proto2";
+option cc_generic_services = false;
+enum EMsg {
+	k_EMsgInvalid = 0;
+	k_EMsgMulti = 1;
+	k_EMsgServiceMethod = 146;
+	k_EMsgServiceMethodResponse = 147;
+	k_EMsgServiceMethodCallFromClient = 151;
+	k_EMsgServiceMethodSendToClient = 152;
+	k_EMsgClientLogOnResponse = 751;
+	k_EMsgClientLogon = 5514;
+	k_EMsgClientToGC = 5452;
+	k_EMsgClientFromGC = 5453;
+	k_EMsgClientServiceMethodLegacy = 5594;
+	k_EMsgClientServiceMethodLegacyResponse = 5595;
+	k_EMsgClientGetUserStats = 818;
+}

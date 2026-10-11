@@ -1,0 +1,5 @@
+syntax = "proto2";
+import "shared.proto";
+enum EGCMsgsCs { k_EMsgGCPing = 5000; k_EMsgGCCsOnly = 5002; }
+message CMsgGCPing { optional uint32 cs_value = 1; optional CMsgShared shared = 2; }
+message CMsgGCCsOnly { optional string note = 1; }

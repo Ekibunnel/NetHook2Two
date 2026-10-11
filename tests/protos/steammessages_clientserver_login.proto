@@ -1,0 +1,20 @@
+syntax = "proto2";
+import "enums_clientserver.proto";
+enum EResultTest { k_EResultTestOK = 1; k_EResultTestFail = 2; }
+message CMsgClientLogon {
+	optional uint32 protocol_version = 1;
+	optional string account_name = 50;
+	optional string password = 51;
+	optional fixed64 client_supplied_steam_id = 5;
+	optional uint32 client_language_rtime32_time = 6;
+	optional bytes machine_id = 60;
+	optional bytes nested_blob = 61;
+	repeated uint32 supported_things = 70;
+	repeated CMsgClientLogonChild children = 71;
+	optional EResultTest result = 72;
+	optional bool flag = 73 [default = false];
+	optional float ratio = 74;
+	optional int64 big = 75;
+}
+message CMsgClientLogonChild { optional string label = 1; optional uint64 account_steamid = 2; }
+message CMsgClientLogonResponse { optional int32 eresult = 1 [default = 2]; optional uint32 rtime32_server_time = 5; }

@@ -1,0 +1,7 @@
+syntax = "proto2";
+message CPlayer_GetGameBadgeLevels_Request { optional uint32 appid = 1; }
+message CPlayer_GetGameBadgeLevels_Response { optional uint32 player_level = 1; repeated Badge badges = 2;
+	message Badge { optional int32 level = 1; optional uint32 series = 2; } }
+service Player {
+	rpc GetGameBadgeLevels (CPlayer_GetGameBadgeLevels_Request) returns (CPlayer_GetGameBadgeLevels_Response);
+}

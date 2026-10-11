@@ -1,0 +1,2 @@
+syntax = "proto2";
+message CMsgBroken { optional uint32 x = ; }

@@ -1,0 +1,2 @@
+syntax = "proto2";
+message CMsgShared { optional uint32 level = 1; }

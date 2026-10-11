@@ -1,0 +1,4 @@
+syntax = "proto2";
+enum EGCBaseClientMsg { k_EMsgGCClientHello = 4006; k_EMsgGCClientWelcome = 4004; }
+message CMsgClientHello { optional uint32 version = 1; optional string client_name = 2; }
+message CMsgClientWelcome { optional uint32 version = 1; optional uint64 gc_steamid = 2; }

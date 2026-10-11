@@ -1,0 +1,11 @@
+syntax = "proto3";
+import "shared.proto";
+import "google/protobuf/descriptor.proto";
+extend google.protobuf.FieldOptions { optional bool is_key = 51000; }
+enum EGCMsgsTf { k_EMsgGCNone = 0; k_EMsgGCPing = 5000; }
+message CMsgGCPing {
+	string tf_text = 1 [(is_key) = true];
+	CMsgShared shared = 2;
+	repeated uint32 numbers = 3;
+	map<string, uint32> counts = 4;
+}
