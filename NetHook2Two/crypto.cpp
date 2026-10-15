@@ -36,31 +36,33 @@ CCrypto::CCrypto() noexcept
 
 
 	SymmetricEncryptChosenIVFn pEncrypt = nullptr;
-	const bool bEncrypt = steamClientScan.FindFunction(
+	nh2::LocateRequest encryptRequest;
+	encryptRequest.name = "SymmetricEncryptChosenIV";
+	encryptRequest.arch = NH_ARCH;
+	encryptRequest.candidates = {
 #ifdef X64BITS
-		"\x48\x83\xEC\x58\x8B\x84\x24\xCC\xCC\xCC\xCC\xC6\x44\x24",
-		"xxxxxxx????xxx",
+		{ "\x48\x83\xEC\x58\x8B\x84\x24\xCC\xCC\xCC\xCC\xC6\x44\x24", "xxxxxxx????xxx" },
 #else
-		"\x55\x8B\xEC\x6A\xCC\xFF\x75\xCC\xFF\x75\xCC\xFF\x75\xCC\xFF\x75\xCC\xFF\x75\xCC\xFF\x75\xCC\xFF\x75\xCC\xFF\x75",
-		"xxxx?xx?xx?xx?xx?xx?xx?xx?xx",
+		{ "\x55\x8B\xEC\x6A\xCC\xFF\x75\xCC\xFF\x75\xCC\xFF\x75\xCC\xFF\x75\xCC\xFF\x75\xCC\xFF\x75\xCC\xFF\x75\xCC\xFF\x75", "xxxx?xx?xx?xx?xx?xx?xx?xx?xx" },
 #endif
-		(void **)&pEncrypt
-	);
+	};
+	const bool bEncrypt = steamClientScan.Locate( encryptRequest, (void **)&pEncrypt );
 
 	Encrypt_Orig = pEncrypt;
 
 	g_pLogger->LogConsole( "CCrypto::SymmetricEncryptChosenIV = 0x%p\n", Encrypt_Orig );
 
-	const bool bPchMsgNameFromEMsg = steamClientScan.FindFunction(
+	nh2::LocateRequest pchRequest;
+	pchRequest.name = "PchMsgNameFromEMsg";
+	pchRequest.arch = NH_ARCH;
+	pchRequest.candidates = {
 #ifdef X64BITS
-		"\x48\x89\x5C\x24\xCC\x57\x48\x83\xEC\x20\x8B\xD9\xE8",
-		"xxxx?xxxxxxxx",
+		{ "\x48\x89\x5C\x24\xCC\x57\x48\x83\xEC\x20\x8B\xD9\xE8", "xxxx?xxxxxxxx" },
 #else
-		"\x55\x8B\xEC\x51\x56\xE8\x00\x00\x00\x00\x8B\x00\x00\x00\x00\x00\x8B\xF0",
-		"xxxxxx????x?????xx",
+		{ "\x55\x8B\xEC\x51\x56\xE8\x00\x00\x00\x00\x8B\x00\x00\x00\x00\x00\x8B\xF0", "xxxxxx????x?????xx" },
 #endif
-		(void**)&PchMsgNameFromEMsg
-	);
+	};
+	const bool bPchMsgNameFromEMsg = steamClientScan.Locate( pchRequest, (void **)&PchMsgNameFromEMsg );
 
 	if (bPchMsgNameFromEMsg)
 	{

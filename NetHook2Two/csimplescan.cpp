@@ -1,6 +1,7 @@
 
 
 #include "csimplescan.h"
+#include "logger.h"
 #include <assert.h>
 
 #define CREATEINTERFACE_PROCNAME	"CreateInterface"
@@ -78,5 +79,68 @@ bool CSimpleScan::FindFunction( const char * sig, const char *mask, void **func 
 
 	*func = m_Signature.sig_addr;
 
+	return true;
+}
+
+
+nh2::SigConfig g_sigConfig;
+
+static void DoLocate( const nh2::ImageView *image, const nh2::LocateRequest *request, nh2::LocateResult *result ) noexcept
+{
+	try
+	{
+		*result = nh2::Locate( *image, *request, g_sigConfig,
+			[]( const std::string &line ) { g_pLogger->LogConsole( "%s\n", line.c_str() ); } );
+	}
+	catch ( ... )
+	{
+	}
+}
+
+// Reading a module that was unmapped or partly protected must not take Steam down with us.
+static bool SafeLocate( const nh2::ImageView *image, const nh2::LocateRequest *request, nh2::LocateResult *result ) noexcept
+{
+#ifdef _MSC_VER
+	__try
+	{
+		DoLocate( image, request, result );
+		return true;
+	}
+	__except ( EXCEPTION_EXECUTE_HANDLER )
+	{
+		return false;
+	}
+#else
+	DoLocate( image, request, result );
+	return true;
+#endif
+}
+
+bool CSimpleScan::Locate( const nh2::LocateRequest &request, void **func ) noexcept
+{
+	if ( !m_bInterfaceSet )
+		return false;
+
+	nh2::ImageView image;
+	const unsigned char *base = nullptr;
+	size_t length = 0;
+	if ( !CSigScan::GetImage( &base, &length ) )
+		return false;
+
+	image.base = base;
+	image.size = length;
+
+	nh2::LocateResult result;
+	if ( !SafeLocate( &image, &request, &result ) )
+	{
+		g_pLogger->LogConsole( "%s: scanning the module failed unexpectedly.\n", request.name.c_str() );
+		return false;
+	}
+
+	if ( !result.ok )
+		return false;
+
+	*func = const_cast<unsigned char *>( base ) + result.rva;
+	g_pLogger->LogConsole( "%s found via %s.\n", request.name.c_str(), result.how.c_str() );
 	return true;
 }

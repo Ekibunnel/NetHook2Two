@@ -85,23 +85,74 @@ const char *RttiName(const void *obj)
 	return name;
 }
 
+// Does this look like a Steam packet (emsg, and for protobuf messages a sane header length)?
+bool LooksLikeSteamPacket(const uint8 *data, uint32 cb)
+{
+	uint32 rawEMsg;
+	memcpy(&rawEMsg, data, sizeof(rawEMsg));
+
+	const uint32 emsg = rawEMsg & 0x7FFFFFFFu;
+	if (emsg == 0 || emsg > 0x10000u)
+		return false;
+
+	if ((rawEMsg & 0x80000000u) != 0)
+	{
+		if (cb < 8)
+			return false;
+		uint32 headerLength;
+		memcpy(&headerLength, data + 4, sizeof(headerLength));
+		return headerLength <= cb - 8 && headerLength <= 0x4000u;
+	}
+
+	return true;
+}
+
+// The raw buffer object is { vtable?, ..., uint8 *data, uint32 size } but the position of data/size moves from
+// one Steam build to the next (+8/+0x10 in one, +0x10/+0x18 in the next). Instead of hard-coding it, look at the
+// slots that can hold a data pointer and accept the first one that leads to something that looks like a packet.
+// The slot that worked is remembered.
 bool ReadBufferObject(const uint8 *buf, const uint8 **ppData, uint32 *pcbData)
 {
-	if (!ReadableRange(buf, 0x14))
+	static const size_t kSlots[] = { 0x10, 0x08, 0x18, 0x20, 0x28, 0x30, 0x38 };
+	static volatile LONG s_cachedSlot = -1;
+
+	if (!ReadableRange(buf, 0x48))
 		return false;
 
-	const uint8 *data = *(const uint8 *const *)(buf + 8);
-	const uint32 cb = *(const uint32 *)(buf + 0x10);
+	auto tryRead = [&](size_t slot) -> bool
+	{
+		const uint8 *data = *(const uint8 *const *)(buf + slot);
+		const uint32 cb = *(const uint32 *)(buf + slot + 8);
 
-	// smallest packet is an emsg, largest is bounded by Steam's message limit
-	if (cb < 4 || cb > 0x1000000u)
-		return false;
-	if (!ReadableRange(data, cb))
-		return false;
+		// smallest packet is an emsg, largest is bounded by Steam's message limit
+		if (cb < 4 || cb > 0x1000000u)
+			return false;
+		if (!ReadableRange(data, cb) || !LooksLikeSteamPacket(data, cb))
+			return false;
 
-	*ppData = data;
-	*pcbData = cb;
-	return true;
+		*ppData = data;
+		*pcbData = cb;
+		return true;
+	};
+
+	const LONG cached = s_cachedSlot;
+	if (cached >= 0 && tryRead((size_t)cached))
+		return true;
+
+	for (size_t slot : kSlots)
+	{
+		if (tryRead(slot))
+		{
+			if (s_cachedSlot != (LONG)slot)
+			{
+				s_cachedSlot = (LONG)slot;
+				g_pLogger->LogConsole("CCMInterface::RecvPkt: packet buffer found at +0x%X\n", (unsigned)slot);
+			}
+			return true;
+		}
+	}
+
+	return false;
 }
 
 bool ExtractPacketBytes(const void *pPacket, const uint8 **ppData, uint32 *pcbData)
@@ -146,37 +197,41 @@ CNet::CNet() noexcept
 	CSimpleScan steamClientScan(STEAMCLIENT_DLL);
 
 	BBuildAndAsyncSendFrameFn pBuildFunc = nullptr;
-	const bool bFoundBuildFunc = steamClientScan.FindFunction(
+	nh2::LocateRequest buildRequest;
+	buildRequest.name = "BBuildAndAsyncSendFrame";
+	buildRequest.arch = NH_ARCH;
+	buildRequest.candidates = {
 #ifdef X64BITS
-		"\x48\x8B\xC4\x55\x48\x8D\x68\x00\x48\x81\xEC\x00\x00\x00\x00\x48\x89\x70\x00\x49\x8B\xF0\x48\x89\x78\x00\x4C\x89\x60",
-		"xxxxxxx?xxx????xxx?xxxxxx?xxx",
+		{ "\x48\x8B\xC4\x55\x48\x8D\x68\x00\x48\x81\xEC\x00\x00\x00\x00\x48\x89\x70\x00\x49\x8B\xF0\x48\x89\x78\x00\x4C\x89\x60", "xxxxxxx?xxx????xxx?xxxxxx?xxx" },
 #else
-		"\x55\x8B\xEC\x83\xEC\xCC\xA1\xCC\xCC\xCC\xCC\x53\x8B\xD9\x89\x5D\xCC\x83\x38\xCC\x75\xCC\x33\xC0\xEB\xCC\x8D\x45\xCC\x50\x6A\xCC\x68\xCC\xCC\xCC\xCC\xFF\x15\xCC\xCC\xCC\xCC\x83\xC4\xCC\x83\x7B\xCC\x02",
-		"xxxxx?x????xxxxx?xx?x?xxx?xx?xx?x????xx????xx?xx?x",
+		{ "\x55\x8B\xEC\x83\xEC\xCC\xA1\xCC\xCC\xCC\xCC\x53\x8B\xD9\x89\x5D\xCC\x83\x38\xCC\x75\xCC\x33\xC0\xEB\xCC\x8D\x45\xCC\x50\x6A\xCC\x68\xCC\xCC\xCC\xCC\xFF\x15\xCC\xCC\xCC\xCC\x83\xC4\xCC\x83\x7B\xCC\x02", "xxxxx?x????xxxxx?xx?x?xxx?xx?xx?x????xx????xx?xx?x" },
 #endif
-		(void**)&pBuildFunc
-	);
+	};
+	const bool bFoundBuildFunc = steamClientScan.Locate( buildRequest, (void **)&pBuildFunc );
 
 	BBuildAndAsyncSendFrame_Orig = pBuildFunc;
 
 	g_pLogger->LogConsole("CWebSocketConnection::BBuildAndAsyncSendFrame = 0x%p\n", BBuildAndAsyncSendFrame_Orig);
 
 	RecvPktFn pRecvPktFunc = nullptr;
-	bool bFoundRecvPktFunc = false;
+	nh2::LocateRequest recvRequest;
+	recvRequest.name = "RecvPkt";
+	recvRequest.arch = NH_ARCH;
 #ifdef X64BITS
-	// Verified unique against a 2026 steamclient64.dll build.
-	bFoundRecvPktFunc = steamClientScan.FindFunction(
-		"\x48\x8B\xC4\x55\x48\x8D\xA8\xCC\xCC\xCC\xCC\x48\x81\xEC\xCC\xCC\xCC\xCC\x48\x89\x58\x08\x48\x8B\xDA\x4C\x89\x68\xCC\x45\x33\xED\x4C\x89\x70\xCC\x4C\x8B\xF1",
-		"xxxxxxx????xxx????xxxxxxxxxx?xxxxxx?xxx",
-		(void**)&pRecvPktFunc
-	);
+	// Just the start of the prologue: the compiler reorders the register saves behind it from build to build.
+	recvRequest.candidates = {
+		{ "\x48\x8B\xC4\x55\x48\x8D\xA8\xCC\xCC\xCC\xCC\x48\x81\xEC\xCC\xCC\xCC\xCC\x48\x89\x58\x08\x48\x8B\xDA", "xxxxxxx????xxx????xxxxxxx" },
+	};
+	// Matches must pass a structural check, and when no signature works the function is found through the
+	// "CCMInterface::RecvPkt" string it references and the PE exception table.
+	recvRequest.validate = nh2::LooksLikeRecvPkt;
+	recvRequest.fallback = nh2::FindRecvPktByStringReference;
 #else
-	bFoundRecvPktFunc = steamClientScan.FindFunction(
-		"\x55\x8B\xEC\x81\xEC\xCC\xCC\xCC\xCC\xA1\xCC\xCC\xCC\xCC\x56\x8B\xF1\x57",
-		"xxxxx????x????xxxx",
-		(void**)&pRecvPktFunc
-	);
+	recvRequest.candidates = {
+		{ "\x55\x8B\xEC\x81\xEC\xCC\xCC\xCC\xCC\xA1\xCC\xCC\xCC\xCC\x56\x8B\xF1\x57", "xxxxx????x????xxxx" },
+	};
 #endif
+	const bool bFoundRecvPktFunc = steamClientScan.Locate( recvRequest, (void **)&pRecvPktFunc );
 
 	RecvPkt_Orig = pRecvPktFunc;
 

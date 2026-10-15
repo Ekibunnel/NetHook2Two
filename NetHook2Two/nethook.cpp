@@ -5,6 +5,7 @@
 
 #include "logger.h"
 #include "crypto.h"
+#include "csimplescan.h"
 #include "net.h"
 #include "steamclient.h"
 
@@ -84,7 +85,7 @@ static DWORD WINAPI NetHook2TwoMain(LPVOID)
 	PrintVersionInfo();
 
 	// The window first, so that anything that goes wrong afterwards is visible in its log.
-	const std::string iniPath = g_pLogger->GetRootDir() + "nethook2_ui.ini";
+	const std::string iniPath = g_pLogger->GetRootDir() + "nethook2two_ui.ini";
 	char szError[256] = {};
 	const bool bUi = nh2win::UiCreate("NetHook2Two", iniPath.c_str(), szError, sizeof(szError));
 
@@ -92,6 +93,28 @@ static DWORD WINAPI NetHook2TwoMain(LPVOID)
 	{
 		g_bOwnsConsole = AllocConsole();
 		g_pLogger->LogConsole("Unable to create the NetHook2Two window (%s). Falling back to console and dump files only.\n", szError);
+	}
+
+	// Optional signature overrides (nethook2two_cfg.ini). A commented template is created on the first run.
+	{
+		const std::string cfgPath = g_pLogger->GetRootDir() + "nethook2two_cfg.ini";
+		const nh2::LocateLog cfgLog = [](const std::string &line) { g_pLogger->LogConsole("%s\n", line.c_str()); };
+
+		if (g_sigConfig.Load(cfgPath, cfgLog))
+		{
+			if (g_sigConfig.Count() != 0)
+				g_pLogger->LogConsole("Loaded %zu signature override(s) from %s\n", g_sigConfig.Count(), cfgPath.c_str());
+		}
+		else
+		{
+			FILE *file = nullptr;
+			if (fopen_s(&file, cfgPath.c_str(), "wb") == 0 && file != nullptr)
+			{
+				const std::string tmpl = nh2::DefaultSigConfigTemplate();
+				fwrite(tmpl.data(), 1, tmpl.size(), file);
+				fclose(file);
+			}
+		}
 	}
 
 	g_pCrypto = new CCrypto();

@@ -43,6 +43,25 @@ This version bundles what used to be three separate tools into one:
 
 Closing the window ejects NetHook2Two from the process.
 
+### Usage
+
+Run `NetHook2Two-Inject.cmd` (it asks for administrator rights) or, in an _elevated_ command prompt:
+
+    rundll32 "<Path To NetHook2Two.dll>",Inject
+
+Optionally with a process id or name for other processes, e.g. `Inject steamcmd.exe`. Unlike earlier versions there is
+no console window; the window opens instead (a console is only created if the window can't be).
+
+To stop: close the window, use *File > Eject NetHook2Two and close*, or run `NetHook2Two-Eject.cmd` /
+`rundll32 "<Path To NetHook2Two.dll>",Eject`.
+
+Make sure you're prepared for the possibility for Steam to crash. Using NetHook2Two isn't an exact science, and sometimes
+things break. If NetHook2Two reports that function scans failed after a Steam update, the binary signatures in
+`net.cpp` / `crypto.cpp` need updating.
+
+NetHook requires the Microsoft Visual C++ Redistributable for your architecture
+(https://aka.ms/vs/17/release/vc_redist.x64.exe / `vc_redist.x86.exe`).
+
 ### Adding more protobuf definitions
 #### You can find up to date `.proto` at [SteamTracking/Protobufs](https://github.com/SteamTracking/Protobufs).
 
@@ -76,6 +95,38 @@ definitions - plain `.proto` files work, no `protoc` needed:
 
 Anything unknown is still displayed field by field.
 
+### Hooks signatures
+
+NetHook2Two hooks four functions in `steamclient64.dll` (`SymmetricEncryptChosenIV`, `PchMsgNameFromEMsg`,
+`BBuildAndAsyncSendFrame` and `RecvPkt`) and finds them again on every start:
+
+1. a signature from `<steam>\nethook\nethook2two_cfg.ini`, if you provided one,
+2. the built-in signature(s). A signature must match **exactly one** place in the code (ambiguous matches are skipped), and
+   for `RecvPkt` the match must also look like the right function,
+3. for `RecvPkt` only: when no signature matches, the function is found by analysing the code - it is the one that uses
+   the string `CCMInterface::RecvPkt` (located through the PE exception table). This doesn't depend on the compiler's
+   instruction choices, so it keeps working across normal Steam updates.
+
+The Log tab shows how each function was found (`RecvPkt found via signature #1`, `... via code analysis`, `... via config
+signature`). If a function can't be found, Steam keeps running, that hook is just missing.
+
+To fix a hook without a new NetHook2Two build, edit `<steam>\nethook\nethook2two_cfg.ini` (a commented template is created
+on the first run) and restart the hook:
+
+```ini
+[x64]
+RecvPkt.sig  = 48 8B C4 55 48 8D A8 ?? ?? ?? ?? 48 81 EC ?? ?? ?? ?? 48 89 58 08 48 8B DA
+RecvPkt.mask =                      ; optional: one 'x' (must match) or '?' (any byte) per byte
+RecvPkt.rva  = 0x5BC990             ; optional: offset of the function from the module base, wins over .sig
+```
+
+* Sections are `[x64]` and `[x86]`; names are `SymmetricEncryptChosenIV`, `PchMsgNameFromEMsg`,
+  `BBuildAndAsyncSendFrame` and `RecvPkt`.
+* A signature is written as hex bytes with `??` for "any byte", or C style (`\x48\x8B\xCC`, where `0xCC` means "any
+  byte" unless a `.mask` is given - the notation used in the source).
+* It must point at the first byte of the function. A configured signature that matches several places uses the first;
+  one that isn't found falls back to the built-in ones. Mistakes in the file are reported in the Log.
+
 ### Compiling
 
 1. Run `.\SetupDependencies.ps1` in a PowerShell prompt to set up dependencies (vcpkg: detours, protobuf, zlib).
@@ -95,25 +146,6 @@ unit tests: `tests/run_tests.sh` (needs `protoc` and the protobuf development fi
 
 (It is still used by the dump writer. The viewer itself uses the definitions found in Steam and only keeps a small built-in
 fallback for the packet header.)
-
-### Usage
-
-Run `NetHook2Two-Inject.cmd` (it asks for administrator rights) or, in an _elevated_ command prompt:
-
-    rundll32 "<Path To NetHook2Two.dll>",Inject
-
-Optionally with a process id or name for other processes, e.g. `Inject steamcmd.exe`. Unlike earlier versions there is
-no console window; the window opens instead (a console is only created if the window can't be).
-
-To stop: close the window, use *File > Eject NetHook2Two and close*, or run `NetHook2Two-Eject.cmd` /
-`rundll32 "<Path To NetHook2Two.dll>",Eject`.
-
-Make sure you're prepared for the possibility for Steam to crash. Using NetHook2Two isn't an exact science, and sometimes
-things break. If NetHook2Two reports that function scans failed after a Steam update, the binary signatures in
-`net.cpp` / `crypto.cpp` need updating.
-
-NetHook requires the Microsoft Visual C++ Redistributable for your architecture
-(https://aka.ms/vs/17/release/vc_redist.x64.exe / `vc_redist.x86.exe`).
 
 ### Dump files and NetHookAnalyzer2
 

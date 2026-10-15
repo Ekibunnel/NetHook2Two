@@ -206,6 +206,7 @@
     <ClCompile Include="version.cpp" />
     <ClCompile Include="zip.cpp" />
     <ClCompile Include="core\decoder.cpp" />
+    <ClCompile Include="core\locator.cpp" />
     <ClCompile Include="core\descriptor_store.cpp" />
     <ClCompile Include="core\protoscan.cpp" />
     <ClCompile Include="ui\nh2_shared.cpp" />
@@ -238,6 +239,7 @@
     <ClInclude Include="version.h" />
     <ClInclude Include="zip.h" />
     <ClInclude Include="core\decoder.h" />
+    <ClInclude Include="core\locator.h" />
     <ClInclude Include="core\descriptor_store.h" />
     <ClInclude Include="core\node.h" />
     <ClInclude Include="core\protoscan.h" />

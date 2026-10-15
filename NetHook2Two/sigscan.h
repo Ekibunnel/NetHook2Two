@@ -52,6 +52,8 @@ public:
 	~CSigScan(void);
 
     static bool GetDllMemInfo(void) noexcept;
+    /* Module image found by GetDllMemInfo(). */
+    static bool GetImage(const unsigned char **base, size_t *len) noexcept { *base = base_addr; *len = base_len; return base_addr != nullptr; }
     int Init(const unsigned char *sig, const char *mask, size_t len);
 };
  
