@@ -10,7 +10,8 @@
 #include "zip.h"
 #include "binaryreader.h"
 
-#include "steammessages_base.pb.h"
+#include "core/multi.h"
+#include "ui/protobuf_updater.h"
 #include "ui/nh2_shared.h"
 
 
@@ -243,28 +244,30 @@ void CLogger::MultiplexMulti( ENetDirection eDirection, const uint8 *pData, uint
 	}
 
 
-	CMsgProtoBufHeader protoheader;
-	protoheader.ParseFromArray( pData + 8, pProtoHdr->headerLength );
-
-
-	CMsgMulti multi;
-	multi.ParseFromArray( pData + 8 + pProtoHdr->headerLength, cubData - 8 - pProtoHdr->headerLength );
+	// CMsgMulti is read with the same definitions the viewer uses (Steam's own, found by the scanner).
+	const std::shared_ptr<const nh2::DescriptorStore> store = nh2win::PublishedDescriptorStore();
+	nh2::MultiMessage multi;
+	if ( !nh2::ParseMulti( store.get(), pData + 8 + pProtoHdr->headerLength, cubData - 8 - pProtoHdr->headerLength, multi ) )
+	{
+		g_pLogger->LogConsole("Unable to parse multi message, ignoring\n");
+		return;
+	}
 
 
 	uint8 *pMsgData = nullptr;
 	uint32 cubMsgData = 0;
 	bool bDecomp = false;
 
-	if ( multi.has_size_unzipped() && multi.size_unzipped() != 0 )
+	if ( multi.sizeUnzipped != 0 )
 	{
 		// decompress our data
 
-		uint8 *pDecompressed = new uint8[ multi.size_unzipped() ];
-		uint8 *pCompressed = (uint8 *)( multi.message_body().c_str() );
-		const uint32 cubCompressed = multi.message_body().length();
+		uint8 *pDecompressed = new uint8[ multi.sizeUnzipped ];
+		uint8 *pCompressed = (uint8 *)( multi.body.c_str() );
+		const uint32 cubCompressed = static_cast<uint32>( multi.body.length() );
 
 
-		const bool bZip = CZip::Inflate( pCompressed, cubCompressed, pDecompressed, multi.size_unzipped() );
+		const bool bZip = CZip::Inflate( pCompressed, cubCompressed, pDecompressed, multi.sizeUnzipped );
 
 		if ( !bZip )
 		{
@@ -275,13 +278,13 @@ void CLogger::MultiplexMulti( ENetDirection eDirection, const uint8 *pData, uint
 		}
 
 		pMsgData = pDecompressed;
-		cubMsgData = multi.size_unzipped();
+		cubMsgData = multi.sizeUnzipped;
 		bDecomp = bZip;
 	}
 	else
 	{
-		pMsgData = (uint8 *)( multi.message_body().c_str() );
-		cubMsgData = multi.message_body().length();
+		pMsgData = (uint8 *)( multi.body.c_str() );
+		cubMsgData = static_cast<uint32>( multi.body.length() );
 	}
 
 	CBinaryReader reader( pMsgData, cubMsgData );

@@ -15,6 +15,7 @@
 #include "../NetHook2Two/core/decoder.h"
 #include "../NetHook2Two/core/descriptor_store.h"
 #include "../NetHook2Two/core/locator.h"
+#include "../NetHook2Two/core/multi.h"
 #include "../NetHook2Two/core/protoscan.h"
 
 #include "gc_test.pb.h"
@@ -233,6 +234,34 @@ int main( int argc, char **argv )
 		}
 		CHECK( built );
 		CHECK( pool.FindMessageTypeByName( "google.protobuf.FileDescriptorProto" ) != nullptr );
+	}
+
+	std::printf( "== CMsgMulti without generated code ==\n" );
+	{
+		// size_unzipped = 300 (field 1), message_body = "hello" (field 2), plus an unknown field 15
+		const std::string wire = std::string( "\x08\xAC\x02", 3 ) + std::string( "\x12\x05hello", 7 ) + std::string( "\x78\x01", 2 );
+		const uint8_t *bytes = reinterpret_cast<const uint8_t *>( wire.data() );
+
+		MultiMessage viaWire;
+		CHECK( ParseMulti( nullptr, bytes, wire.size(), viaWire ) );
+		CHECK( viaWire.sizeUnzipped == 300 );
+		CHECK( viaWire.body == "hello" );
+
+		auto builtinOnly = std::make_unique<DescriptorStore>();
+		builtinOnly->Load( {}, std::string(), false, []( const std::string & ) {} );
+		CHECK( builtinOnly->FindMessage( "CMsgMulti" ) != nullptr );
+		MultiMessage viaStore;
+		CHECK( ParseMulti( builtinOnly.get(), bytes, wire.size(), viaStore ) );
+		CHECK( viaStore.sizeUnzipped == 300 );
+		CHECK( viaStore.body == "hello" );
+
+		MultiMessage empty;
+		CHECK( ParseMulti( builtinOnly.get(), bytes, 0, empty ) );
+		CHECK( empty.sizeUnzipped == 0 && empty.body.empty() );
+
+		const std::string truncated = wire.substr( 0, 5 ); // body cut short
+		MultiMessage bad;
+		CHECK( !ParseMulti( nullptr, reinterpret_cast<const uint8_t *>( truncated.data() ), truncated.size(), bad ) );
 	}
 
 	std::printf( "== store: scan, cache, rescan on change ==\n" );

@@ -51,4 +51,7 @@ private:
 	std::shared_ptr<const nh2::DescriptorStore> current_;
 };
 
+// The store the running ProtobufUpdater published last (null until the first scan finished). Safe to call from any thread.
+std::shared_ptr<const nh2::DescriptorStore> PublishedDescriptorStore();
+
 } // namespace nh2win

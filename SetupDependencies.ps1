@@ -55,4 +55,3 @@ else {
 # DO need to call this
 . $vcpkg integrate install
 
-# todo: compile or download protoc and generate steammessages_base.pb.{h|cpp}

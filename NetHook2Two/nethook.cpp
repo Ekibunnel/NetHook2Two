@@ -11,7 +11,6 @@
 
 #include "nh2_string.h"
 
-#include "steammessages_base.pb.h"
 #include "version.h"
 
 #include "ui/nh2_shared.h"

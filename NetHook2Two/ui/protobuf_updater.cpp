@@ -18,6 +18,9 @@ namespace nh2win
 namespace
 {
 
+std::mutex g_publishedMutex;
+std::shared_ptr<const nh2::DescriptorStore> g_published;
+
 std::string ModulePath( HMODULE module )
 {
 	char buffer[ MAX_PATH * 2 ] = {};
@@ -169,8 +172,18 @@ void ProtobufUpdater::Run( bool forceRescan )
 		std::lock_guard<std::mutex> lock( mutex_ );
 		current_ = std::move( store );
 	}
+	{
+		std::lock_guard<std::mutex> lock( g_publishedMutex );
+		g_published = Current();
+	}
 
 	version_++;
+}
+
+std::shared_ptr<const nh2::DescriptorStore> PublishedDescriptorStore()
+{
+	std::lock_guard<std::mutex> lock( g_publishedMutex );
+	return g_published;
 }
 
 } // namespace nh2win

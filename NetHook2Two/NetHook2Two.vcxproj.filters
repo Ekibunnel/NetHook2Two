@@ -35,9 +35,6 @@
     <ClCompile Include="sigscan.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="steammessages_base.pb.cc">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="zip.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -74,9 +71,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="sigscan.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="steammessages_base.pb.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="zip.h">
