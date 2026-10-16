@@ -132,24 +132,15 @@ RecvPkt.rva  = 0x5BC990             ; optional: offset of the function from the 
 1. Run `.\SetupDependencies.ps1` in a PowerShell prompt to set up dependencies (vcpkg: detours, protobuf, zlib).
    Dear ImGui is bundled in `NetHook2Two\third_party\imgui`.
 2. Build `NetHook2Two.sln` with Visual Studio (platform toolset v145; x64 for current 64-bit Steam, Win32 for the legacy client). C++17.
-
-Incoming packets (`CCMInterface::RecvPkt`): the current 64-bit client hands the function a raw buffer object (data pointer at +8, size at +0x10). NetHook2Two validates every pointer before reading it; if Steam changes the layout it logs "unrecognized packet object" instead of crashing.
-3. You'll get `NetHook2Two.dll`. Note its full path.
+3. You'll get `NetHook2Two.dll`.
 
 The protobuf scanning, descriptor handling and packet decoding (`NetHook2Two\core`) don't use any Windows APIs and have
 unit tests: `tests/run_tests.sh` (needs `protoc` and the protobuf development files).
 
-#### Updating steammessages_base
-
-1. Download `protoc` for the same version as specified in `NetHook2Two\vcpkg.json`.
-2. Run `.\protoc.exe .\steammessages_base.proto --cpp_out=build`
-
-(It is still used by the dump writer. The viewer itself uses the definitions found in Steam and only keeps a small built-in
-fallback for the packet header.)
 
 ### Dump files and NetHookAnalyzer2
 
-Unless switched off (*View > Also write dump files to disk*), packets are still written to `nethook/<timestamp>` inside
+Unless switched off (*File > Also write dump files to disk*), packets are still written to `nethook/<timestamp>` inside
 the Steam folder exactly as before, so NetHookAnalyzer2 can keep being used on them.
 
 ## License
