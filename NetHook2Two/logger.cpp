@@ -34,8 +34,19 @@ CLogger::CLogger() noexcept
 	ss << m_RootDir << currentTime << "\\";
 	m_LogDir = ss.str();
 
-	// create the session log directory
-	CreateDirectoryA( m_LogDir.c_str(), nullptr );
+	// the session directory is created lazily, right before the first file is written (see LogSessionData)
+}
+
+
+const std::string &CLogger::EnsureLogDir()
+{
+	if ( !m_bLogDirCreated )
+	{
+		CreateDirectoryA( m_RootDir.c_str(), nullptr );
+		CreateDirectoryA( m_LogDir.c_str(), nullptr );
+		m_bLogDirCreated = true;
+	}
+	return m_LogDir;
 }
 
 
@@ -112,10 +123,11 @@ void CLogger::LogSessionData( ENetDirection eDirection, const uint8 *pData, uint
 	// Look the name up once; Steam knows its own message names best.
 	const char *szName = g_pCrypto ? g_pCrypto->GetMessage( eMsg, 0xFF ) : nullptr;
 
-	// Hand the packet to the live viewer.
+	// Hand the packet to the live viewer. Its number is the one shown in the main window and used in the dump name.
+	const uint64 packetId = nh2win::g_packetQueue.NextId();
 	{
 		nh2win::CapturedPacket packet;
-		packet.id = nh2win::g_packetQueue.NextId();
+		packet.id = packetId;
 
 		FILETIME ft;
 		GetSystemTimeAsFileTime( &ft );
@@ -130,9 +142,11 @@ void CLogger::LogSessionData( ENetDirection eDirection, const uint8 *pData, uint
 	if ( !nh2win::g_dumpToDisk )
 		return;
 
+	EnsureLogDir();
+
 	std::string fullFile = m_LogDir;
 
-	const char *outFile = GetFileNameBase( eDirection, eMsg, 0xFF );
+	const char *outFile = GetFileNameBase( eDirection, eMsg, 0xFF, packetId );
 	fullFile += outFile;
 
 	std::string fullFileTmp = fullFile + ".tmp";
@@ -151,6 +165,8 @@ void CLogger::LogSessionData( ENetDirection eDirection, const uint8 *pData, uint
 
 HANDLE CLogger::OpenFile( const char *szFileName, bool bSession )
 {
+	if ( bSession )
+		EnsureLogDir();
 	std::string outputFile = ( bSession ? m_LogDir : m_RootDir );
 	outputFile += szFileName;
 
@@ -187,7 +203,7 @@ void CLogger::LogOpenFile( HANDLE hFile, const char *szFmt, ... )
 	delete [] szBuff;
 }
 
-const char *CLogger::GetFileNameBase( ENetDirection eDirection, EMsg eMsg, uint8 serverType )
+const char *CLogger::GetFileNameBase( ENetDirection eDirection, EMsg eMsg, uint8 serverType, uint64 packetId )
 {
 	static char szFileName[MAX_PATH];
 
@@ -198,7 +214,7 @@ const char *CLogger::GetFileNameBase( ENetDirection eDirection, EMsg eMsg, uint8
 	sprintf_s(
 		szFileName, sizeof( szFileName ),
 		"%03u_%s_%d_%s",
-		++m_uiMsgNum,
+		static_cast<unsigned int>( packetId ),
 		( eDirection == ENetDirection::k_eNetIncoming ? "in" : "out" ),
 		static_cast<int>( eMsg ),
 		szMsgName

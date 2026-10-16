@@ -122,3 +122,4 @@ NetHook2Two/vcpkg_installed
 tests/*.pb.cc
 tests/*.pb.h
 tests/test.desc
+tests/core_test

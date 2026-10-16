@@ -12,16 +12,19 @@
 #include <cfloat>
 #include <filesystem>
 #include <cstdio>
+#include <cstring>
 #include <deque>
 #include <set>
 #include <string>
 #include <vector>
 
 #include "imgui.h"
+#include "imgui_internal.h"
 #include "backends/imgui_impl_dx11.h"
 #include "backends/imgui_impl_win32.h"
 
 #include "../core/decoder.h"
+#include "../core/locator.h"
 #include "../logger.h"
 #include "nh2_shared.h"
 #include "protobuf_updater.h"
@@ -50,6 +53,8 @@ bool g_dx11Ready = false;
 std::string g_iniPath;
 
 ImFont *g_fontMono = nullptr;
+float g_dpi = 1.0f;
+float g_appliedScale = 1.0f;
 
 const char kWindowClassName[] = "NetHook2Two_ImGui_Window";
 
@@ -108,6 +113,8 @@ void CleanupDevice()
 	if ( g_device ) { g_device->Release(); g_device = nullptr; }
 }
 
+void RenderLive(); // draws one frame right now (defined next to UiRun); used while the window is being resized
+
 LRESULT CALLBACK WndProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam )
 {
 	if ( ImGui_ImplWin32_WndProcHandler( hwnd, msg, wParam, lParam ) )
@@ -120,8 +127,14 @@ LRESULT CALLBACK WndProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam )
 		{
 			g_resizeWidth = LOWORD( lParam );
 			g_resizeHeight = HIWORD( lParam );
+			// Windows runs a modal loop while the border is dragged, so the main loop doesn't get to run:
+			// render from here so the window keeps updating during the resize.
+			RenderLive();
 		}
 		return 0;
+
+	case WM_ERASEBKGND:
+		return 1; // everything is drawn by Direct3D
 
 	case WM_SYSCOMMAND:
 		if ( ( wParam & 0xfff0 ) == SC_KEYMENU ) // no ALT application menu
@@ -174,6 +187,17 @@ std::string FormatTime( uint64_t fileTime )
 	return buffer;
 }
 
+// View menu settings. Saved in the same ini file as the window layout (nethook2two_ui.ini) through a custom
+// settings handler, see UiCreate().
+struct ViewSettings
+{
+	bool showUnset = false;
+	bool autoScroll = true;
+	float scale = 1.0f; // text scale; the font atlas is rebuilt at this size so text stays sharp
+};
+
+ViewSettings g_view;
+
 class Viewer
 {
 public:
@@ -223,10 +247,10 @@ private:
 
 	// view state
 	bool paused_ = false;
-	bool autoScroll_ = true;
 	bool showIn_ = true, showOut_ = true;
-	bool showUnset_ = false;
-	bool showLog_ = false;
+	// View menu state that is persisted: see g_view
+	bool lastShowUnset_ = false, lastAutoScroll_ = true;
+	float lastScale_ = 1.0f;
 	bool openProtobufPopup_ = false;
 
 	// "GC protobuf folders" window: binds extra\<folder> to app ids
@@ -407,18 +431,18 @@ void Viewer::SelectRow( uint64_t id )
 
 void Viewer::RefreshDetails( const Row &row )
 {
-	if ( detailKey_ == row.id && detailStoreVersion_ == storeVersion_ && detailShowUnset_ == showUnset_ )
+	if ( detailKey_ == row.id && detailStoreVersion_ == storeVersion_ && detailShowUnset_ == g_view.showUnset )
 		return;
 
 	detailKey_ = row.id;
 	detailStoreVersion_ = storeVersion_;
-	detailShowUnset_ = showUnset_;
+	detailShowUnset_ = g_view.showUnset;
 
 	nh2::PacketDecoder fallback( nullptr );
 	const nh2::PacketDecoder &decoder = decoder_ ? *decoder_ : fallback;
 
 	nh2::DecodeOptions options;
-	options.showUnsetFields = showUnset_;
+	options.showUnsetFields = g_view.showUnset;
 
 	detailTree_ = decoder.Decode( row.data.data(), row.data.size(), row.hookName, options );
 	detailText_ = nh2::NodeToText( detailTree_ );
@@ -449,8 +473,18 @@ void Viewer::DrawMenuBar()
 
 	if ( ImGui::BeginMenu( "File" ) )
 	{
+		bool dump = g_dumpToDisk;
+		if ( ImGui::MenuItem( "Also write dump files to disk", nullptr, &dump ) )
+		{
+			g_dumpToDisk = dump;
+			if ( !g_cfgPath.empty() )
+				nh2::SetIniValue( g_cfgPath, "general", "DumpToDisk", dump ? "1" : "0" );
+		}
+
+		ImGui::Separator();
+
 		if ( ImGui::MenuItem( "Open dump folder" ) && g_pLogger )
-			ShellExecuteA( nullptr, "open", g_pLogger->GetLogDir().c_str(), nullptr, nullptr, SW_SHOWNORMAL );
+			ShellExecuteA( nullptr, "open", ( g_pLogger->LogDirExists() ? g_pLogger->GetLogDir() : g_pLogger->GetRootDir() ).c_str(), nullptr, nullptr, SW_SHOWNORMAL );
 
 		const int idx = selectedId_ ? FindRowIndex( selectedId_ ) : -1;
 		if ( ImGui::MenuItem( "Save selected packet as .bin", nullptr, false, idx >= 0 && g_pLogger ) )
@@ -458,7 +492,7 @@ void Viewer::DrawMenuBar()
 			const Row &row = rows_[ static_cast<size_t>( idx ) ];
 			char name[ 64 ];
 			snprintf( name, sizeof( name ), "selected_%llu.bin", static_cast<unsigned long long>( row.id ) );
-			const std::string path = g_pLogger->GetLogDir() + name;
+			const std::string path = g_pLogger->EnsureLogDir() + name;
 			if ( FILE *f = fopen( path.c_str(), "wb" ) )
 			{
 				fwrite( row.data.data(), 1, row.data.size(), f );
@@ -476,15 +510,9 @@ void Viewer::DrawMenuBar()
 
 	if ( ImGui::BeginMenu( "View" ) )
 	{
-		if ( ImGui::MenuItem( "Show unset fields", nullptr, &showUnset_ ) ) {}
-		ImGui::MenuItem( "Auto-scroll", nullptr, &autoScroll_ );
-		ImGui::MenuItem( "Log", nullptr, &showLog_ );
-
-		bool dump = g_dumpToDisk;
-		if ( ImGui::MenuItem( "Also write dump files to disk", nullptr, &dump ) )
-			g_dumpToDisk = dump;
-
-		ImGui::SliderFloat( "Scale", &ImGui::GetIO().FontGlobalScale, 0.7f, 2.0f, "%.2f" );
+		if ( ImGui::MenuItem( "Show unset fields", nullptr, &g_view.showUnset ) ) {}
+		ImGui::MenuItem( "Auto-scroll", nullptr, &g_view.autoScroll );
+		ImGui::SliderFloat( "Scale", &g_view.scale, 0.7f, 2.0f, "%.2f" ); // applied when the slider is released
 		ImGui::EndMenu();
 	}
 
@@ -501,13 +529,6 @@ void Viewer::DrawMenuBar()
 
 		if ( ImGui::MenuItem( "Rescan Steam binaries now", nullptr, false, !updater_.IsRunning() ) )
 			updater_.Start( true );
-
-		if ( ImGui::MenuItem( "Open extra .proto folder" ) )
-		{
-			std::error_code ec;
-			std::filesystem::create_directories( updater_.ExtraDir(), ec );
-			ShellExecuteA( nullptr, "open", updater_.ExtraDir().c_str(), nullptr, nullptr, SW_SHOWNORMAL );
-		}
 
 		if ( ImGui::MenuItem( "Open protobuf folder" ) )
 			ShellExecuteA( nullptr, "open", updater_.CacheDir().c_str(), nullptr, nullptr, SW_SHOWNORMAL );
@@ -536,7 +557,7 @@ void Viewer::DrawToolbar()
 	ImGui::SameLine();
 	if ( ImGui::Checkbox( "Out", &showOut_ ) ) RebuildVisible();
 	ImGui::SameLine();
-	ImGui::Checkbox( "Auto-scroll", &autoScroll_ );
+	ImGui::Checkbox( "Auto-scroll", &g_view.autoScroll );
 
 	ImGui::SameLine();
 	ImGui::SetNextItemWidth( ImGui::GetContentRegionAvail().x * 0.45f );
@@ -691,7 +712,7 @@ void Viewer::DrawPacketTable( float height )
 		}
 	}
 
-	if ( autoScroll_ && atBottom && newRowsThisFrame_ && !paused_ )
+	if ( g_view.autoScroll && atBottom && newRowsThisFrame_ && !paused_ )
 		ImGui::SetScrollHereY( 1.0f );
 
 	ImGui::EndTable();
@@ -1158,12 +1179,20 @@ void Viewer::Frame()
 {
 	CheckStore();
 
+	if ( lastShowUnset_ != g_view.showUnset || lastAutoScroll_ != g_view.autoScroll || lastScale_ != g_view.scale )
+	{
+		lastShowUnset_ = g_view.showUnset;
+		lastAutoScroll_ = g_view.autoScroll;
+		lastScale_ = g_view.scale;
+		ImGui::MarkIniSettingsDirty();
+	}
+
 	const ImGuiViewport *viewport = ImGui::GetMainViewport();
 	ImGui::SetNextWindowPos( viewport->WorkPos );
 	ImGui::SetNextWindowSize( viewport->WorkSize );
 
 	const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
-		ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoBringToFrontOnFocus;
+		ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
 
 	if ( ImGui::Begin( "NetHook2Two##main", nullptr, flags ) )
 	{
@@ -1172,7 +1201,7 @@ void Viewer::Frame()
 
 		const float statusHeight = ImGui::GetTextLineHeightWithSpacing() + ImGui::GetStyle().ItemSpacing.y * 2;
 		const float splitterHeight = 8.0f;
-		const float avail = std::max( 100.0f, ImGui::GetContentRegionAvail().y - statusHeight - splitterHeight );
+		const float avail = std::max( 100.0f, ImGui::GetContentRegionAvail().y - statusHeight - splitterHeight - ImGui::GetStyle().ItemSpacing.y * 2 );
 		const float tableHeight = avail * splitRatio_;
 
 		DrawPacketTable( tableHeight );
@@ -1269,12 +1298,44 @@ bool UiCreate( const char *windowTitle, const char *iniFilePath, char *errorOut,
 	io.IniFilename = g_iniPath.empty() ? nullptr : g_iniPath.c_str();
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
+	// Persist the View menu in the same ini file: [NetHook2Two][View]
+	{
+		ImGuiSettingsHandler handler;
+		handler.TypeName = "NetHook2Two";
+		handler.TypeHash = ImHashStr( "NetHook2Two" );
+		handler.ReadOpenFn = []( ImGuiContext *, ImGuiSettingsHandler *, const char *name ) -> void *
+		{
+			return strcmp( name, "View" ) == 0 ? static_cast<void *>( &g_view ) : nullptr;
+		};
+		handler.ReadLineFn = []( ImGuiContext *, ImGuiSettingsHandler *, void *, const char *line )
+		{
+			int i = 0;
+			float f = 1.0f;
+			if ( sscanf( line, "ShowUnset=%d", &i ) == 1 )
+				g_view.showUnset = i != 0;
+			else if ( sscanf( line, "AutoScroll=%d", &i ) == 1 )
+				g_view.autoScroll = i != 0;
+			else if ( sscanf( line, "Scale=%f", &f ) == 1 )
+				g_view.scale = std::max( 0.7f, std::min( 2.0f, f ) );
+		};
+		handler.WriteAllFn = []( ImGuiContext *, ImGuiSettingsHandler *h, ImGuiTextBuffer *buf )
+		{
+			buf->appendf( "[%s][View]\n", h->TypeName );
+			buf->appendf( "ShowUnset=%d\n", g_view.showUnset ? 1 : 0 );
+			buf->appendf( "AutoScroll=%d\n", g_view.autoScroll ? 1 : 0 );
+			buf->appendf( "Scale=%.2f\n\n", g_view.scale );
+		};
+		ImGui::AddSettingsHandler( &handler );
+	}
+
 	ImGui::StyleColorsDark();
 	ImGui::GetStyle().WindowRounding = 0.0f;
 	ImGui::GetStyle().FrameRounding = 3.0f;
 
 	const float dpi = ImGui_ImplWin32_GetDpiScaleForHwnd( g_hwnd );
-	LoadFonts( dpi > 0 ? dpi : 1.0f );
+	g_dpi = dpi > 0 ? dpi : 1.0f;
+	LoadFonts( g_dpi * g_view.scale );
+	g_appliedScale = g_view.scale;
 
 	if ( !ImGui_ImplWin32_Init( g_hwnd ) )
 		return fail( "ImGui_ImplWin32_Init failed" );
@@ -1287,12 +1348,67 @@ bool UiCreate( const char *windowTitle, const char *iniFilePath, char *errorOut,
 	return true;
 }
 
+namespace
+{
+Viewer *g_liveViewer = nullptr;
+bool g_inRender = false;
+
+void RenderFrame( Viewer &viewer )
+{
+	if ( g_inRender || !g_swapChain || IsIconic( g_hwnd ) )
+		return;
+	g_inRender = true;
+
+	if ( g_resizeWidth != 0 && g_resizeHeight != 0 )
+	{
+		CleanupRenderTarget();
+		g_swapChain->ResizeBuffers( 0, g_resizeWidth, g_resizeHeight, DXGI_FORMAT_UNKNOWN, 0 );
+		g_resizeWidth = g_resizeHeight = 0;
+		CreateRenderTarget();
+	}
+
+	// Text scale changed (slider released / settings loaded): rebuild the glyph atlas at the new pixel size instead of
+	// stretching the old bitmap, so text stays sharp.
+	if ( g_view.scale != g_appliedScale && !ImGui::IsMouseDown( ImGuiMouseButton_Left ) )
+	{
+		ImGui_ImplDX11_InvalidateDeviceObjects();
+		ImGui::GetIO().Fonts->Clear();
+		LoadFonts( g_dpi * g_view.scale );
+		g_appliedScale = g_view.scale;
+	}
+
+	ImGui_ImplDX11_NewFrame();
+	ImGui_ImplWin32_NewFrame();
+	ImGui::NewFrame();
+
+	viewer.Frame();
+
+	ImGui::Render();
+
+	const float color[ 4 ] = { 0.08f, 0.08f, 0.09f, 1.0f };
+	g_context->OMSetRenderTargets( 1, &g_rtv, nullptr );
+	g_context->ClearRenderTargetView( g_rtv, color );
+	ImGui_ImplDX11_RenderDrawData( ImGui::GetDrawData() );
+
+	const HRESULT hr = g_swapChain->Present( 1, 0 );
+	if ( hr == DXGI_STATUS_OCCLUDED )
+		Sleep( 20 );
+
+	g_inRender = false;
+}
+
+void RenderLive()
+{
+	if ( g_liveViewer && g_imguiReady )
+		RenderFrame( *g_liveViewer );
+}
+} // namespace
+
 void UiRun( ProtobufUpdater &updater )
 {
 	Viewer viewer( updater );
 	g_viewer = &viewer;
-
-	const ImVec4 clear( 0.08f, 0.08f, 0.09f, 1.0f );
+	g_liveViewer = &viewer;
 
 	while ( !g_quitRequested )
 	{
@@ -1314,32 +1430,10 @@ void UiRun( ProtobufUpdater &updater )
 			continue;
 		}
 
-		if ( g_resizeWidth != 0 && g_resizeHeight != 0 )
-		{
-			CleanupRenderTarget();
-			g_swapChain->ResizeBuffers( 0, g_resizeWidth, g_resizeHeight, DXGI_FORMAT_UNKNOWN, 0 );
-			g_resizeWidth = g_resizeHeight = 0;
-			CreateRenderTarget();
-		}
-
-		ImGui_ImplDX11_NewFrame();
-		ImGui_ImplWin32_NewFrame();
-		ImGui::NewFrame();
-
-		viewer.Frame();
-
-		ImGui::Render();
-
-		const float color[ 4 ] = { clear.x, clear.y, clear.z, clear.w };
-		g_context->OMSetRenderTargets( 1, &g_rtv, nullptr );
-		g_context->ClearRenderTargetView( g_rtv, color );
-		ImGui_ImplDX11_RenderDrawData( ImGui::GetDrawData() );
-
-		const HRESULT hr = g_swapChain->Present( 1, 0 );
-		if ( hr == DXGI_STATUS_OCCLUDED )
-			Sleep( 20 );
+		RenderFrame( viewer );
 	}
 
+	g_liveViewer = nullptr;
 	g_viewer = nullptr;
 }
 

@@ -65,6 +65,9 @@ bool IsExecutableRva( const ImageView &image, size_t rva );
 //
 // nethook2two_cfg.ini
 //
+//   [general]
+//   DumpToDisk = 1             ; also write the classic nethook\<time>\*.bin files
+//
 //   [x64]                      ; or [x86]
 //   RecvPkt.sig  = 48 8B C4 55 48 8D A8 ?? ?? ?? ?? 48 81 EC ?? ?? ?? ??
 //   RecvPkt.mask =                      ; optional, 'x' exact / '?' wildcard, same length as the signature
@@ -90,9 +93,17 @@ public:
 	const SigOverride *Find( const std::string &arch, const std::string &name ) const;
 	size_t Count() const { return overrides_.size(); }
 
+	// Plain settings from the [general] section (e.g. DumpToDisk = 1).
+	bool GetBool( const std::string &key, bool defaultValue ) const;
+
 private:
 	std::map<std::string, SigOverride> overrides_; // "x64.recvpkt"
+	std::map<std::string, std::string> general_;   // lower case key -> value
 };
+
+// Sets `key = value` inside [section] of an ini file, keeping everything else (comments, other sections, line
+// endings) as it is. Creates the file / section / key when missing.
+bool SetIniValue( const std::string &path, const std::string &section, const std::string &key, const std::string &value );
 
 // Commented template that is written next to the ini the first time NetHook2Two runs.
 std::string DefaultSigConfigTemplate();

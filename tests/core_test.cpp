@@ -687,6 +687,42 @@ int main( int argc, char **argv )
 		SigConfig live;
 		CHECK( live.Parse( uncommented, nullptr ) == 0 && live.Count() == 5 ); // 4 x64 + 1 x86 examples are valid
 
+		// [general] settings and in-place ini updates
+		{
+			SigConfig g;
+			CHECK( g.Parse( "[general]\nDumpToDisk = 0 ; off\nOther = yes\n[x64]\nRecvPkt.rva = 0x10\n", nullptr ) == 0 );
+			CHECK( !g.GetBool( "DumpToDisk", true ) && g.GetBool( "other", false ) && g.GetBool( "Missing", true ) );
+			CHECK( g.Count() == 1 );
+
+			const std::string path = ( work / "cfg_edit.ini" ).string();
+			std::remove( path.c_str() );
+			CHECK( SetIniValue( path, "general", "DumpToDisk", "0" ) ); // creates the file and the section
+			SigConfig fromNew;
+			CHECK( fromNew.Load( path, nullptr ) && !fromNew.GetBool( "DumpToDisk", true ) );
+
+			{
+				std::ofstream out( path, std::ios::binary | std::ios::trunc );
+				out << "; keep me\r\n[x64]\r\nRecvPkt.rva = 0x10\r\n\r\n[general]\r\n; DumpToDisk = 0 (comment)\r\nDumpToDisk = 1\r\n\r\n[x86]\r\nRecvPkt.rva = 0x20\r\n";
+			}
+			CHECK( SetIniValue( path, "general", "DumpToDisk", "0" ) );
+			CHECK( SetIniValue( path, "general", "Extra", "5" ) ); // new key goes into the existing section
+			const std::vector<uint8_t> raw = ReadAll( path );
+			const std::string text( raw.begin(), raw.end() );
+			CHECK_CONTAINS( text, "; keep me\r\n[x64]\r\nRecvPkt.rva = 0x10\r\n" );
+			CHECK_CONTAINS( text, "; DumpToDisk = 0 (comment)\r\nDumpToDisk = 0\r\nExtra = 5\r\n\r\n[x86]\r\nRecvPkt.rva = 0x20\r\n" );
+			SigConfig reloaded;
+			reloaded.Load( path, nullptr );
+			CHECK( !reloaded.GetBool( "DumpToDisk", true ) && reloaded.Count() == 2 );
+
+			{
+				std::ofstream out( path, std::ios::binary | std::ios::trunc );
+				out << "[x64]\nRecvPkt.rva = 0x10\n";
+			}
+			CHECK( SetIniValue( path, "general", "DumpToDisk", "1" ) ); // section appended, LF kept
+			const std::vector<uint8_t> raw2 = ReadAll( path );
+			CHECK( std::string( raw2.begin(), raw2.end() ) == "[x64]\nRecvPkt.rva = 0x10\n\n[general]\nDumpToDisk = 1\n" );
+		}
+
 		// a fake module
 		const std::vector<uint8_t> module = MakeFakeModule( false );
 		const ImageView image{ module.data(), module.size() };

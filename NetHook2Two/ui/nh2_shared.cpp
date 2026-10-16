@@ -8,6 +8,7 @@ namespace nh2win
 PacketQueue g_packetQueue;
 LogBuffer g_logBuffer;
 std::atomic<bool> g_dumpToDisk{ true };
+std::string g_cfgPath;
 std::atomic<bool> g_quitRequested{ false };
 
 void PacketQueue::Push( CapturedPacket &&packet )

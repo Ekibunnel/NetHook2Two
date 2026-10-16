@@ -100,6 +100,8 @@ static DWORD WINAPI NetHook2TwoMain(LPVOID)
 		const std::string cfgPath = g_pLogger->GetRootDir() + "nethook2two_cfg.ini";
 		const nh2::LocateLog cfgLog = [](const std::string &line) { g_pLogger->LogConsole("%s\n", line.c_str()); };
 
+		nh2win::g_cfgPath = cfgPath;
+
 		if (g_sigConfig.Load(cfgPath, cfgLog))
 		{
 			if (g_sigConfig.Count() != 0)
@@ -116,6 +118,9 @@ static DWORD WINAPI NetHook2TwoMain(LPVOID)
 			}
 		}
 	}
+
+	// Settings that have to be known before the first packet is captured.
+	nh2win::g_dumpToDisk = g_sigConfig.GetBool("DumpToDisk", true);
 
 	g_pCrypto = new CCrypto();
 	g_pNet = new NetHook::CNet();

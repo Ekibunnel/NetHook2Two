@@ -38,13 +38,18 @@ public:
 	const std::string &GetRootDir() const noexcept { return m_RootDir; }
 	const std::string &GetLogDir() const noexcept { return m_LogDir; }
 
+	// Creates the per-session dump folder on first use; returns its path.
+	const std::string &EnsureLogDir();
+	bool LogDirExists() const noexcept { return m_bLogDirCreated; }
+
 private:
-	const char *GetFileNameBase( ENetDirection eDirection, EMsg eMsg, uint8 serverType = 0xFF );
+	const char *GetFileNameBase( ENetDirection eDirection, EMsg eMsg, uint8 serverType, uint64 packetId );
 	void MultiplexMulti( ENetDirection eDirection, const uint8 *pData, uint32 cubData );
 
 private:
 	std::string m_RootDir;
 	std::string m_LogDir;
+	bool m_bLogDirCreated = false;
 
 	uint32 m_uiMsgNum;
 

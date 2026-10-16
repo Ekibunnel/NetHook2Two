@@ -559,6 +559,7 @@ std::string StripComment( const std::string &value )
 int SigConfig::Parse( const std::string &text, const LocateLog &log )
 {
 	overrides_.clear();
+	general_.clear();
 	int problems = 0;
 
 	std::map<std::string, PendingOverride> pending;
@@ -603,6 +604,12 @@ int SigConfig::Parse( const std::string &text, const LocateLog &log )
 
 		const std::string key = Lower( Trim( line.substr( 0, eq ) ) );
 		const std::string value = StripComment( line.substr( eq + 1 ) );
+
+		if ( section == "general" )
+		{
+			general_[ key ] = value;
+			continue;
+		}
 
 		const size_t dot = key.rfind( '.' );
 		if ( dot == std::string::npos )
@@ -694,6 +701,7 @@ bool SigConfig::Load( const std::string &path, const LocateLog &log )
 	if ( f == nullptr )
 	{
 		overrides_.clear();
+		general_.clear();
 		return false;
 	}
 
@@ -711,6 +719,103 @@ bool SigConfig::Load( const std::string &path, const LocateLog &log )
 	return true;
 }
 
+bool SigConfig::GetBool( const std::string &key, bool defaultValue ) const
+{
+	auto it = general_.find( Lower( key ) );
+	if ( it == general_.end() )
+		return defaultValue;
+
+	const std::string v = Lower( it->second );
+	if ( v == "1" || v == "true" || v == "yes" || v == "on" )
+		return true;
+	if ( v == "0" || v == "false" || v == "no" || v == "off" )
+		return false;
+	return defaultValue;
+}
+
+bool SetIniValue( const std::string &path, const std::string &section, const std::string &key, const std::string &value )
+{
+	std::string text;
+	if ( FILE *f = std::fopen( path.c_str(), "rb" ) )
+	{
+		char buffer[ 4096 ];
+		size_t n;
+		while ( ( n = std::fread( buffer, 1, sizeof( buffer ), f ) ) > 0 )
+			text.append( buffer, n );
+		std::fclose( f );
+	}
+
+	const bool crlf = text.find( "\r\n" ) != std::string::npos || text.empty();
+	std::vector<std::string> lines;
+	{
+		std::istringstream in( text );
+		std::string line;
+		while ( std::getline( in, line ) )
+		{
+			if ( !line.empty() && line.back() == '\r' )
+				line.pop_back();
+			lines.push_back( line );
+		}
+	}
+
+	const std::string wantSection = Lower( section ), wantKey = Lower( key );
+	const std::string newLine = key + " = " + value;
+
+	int sectionStart = -1, sectionEnd = static_cast<int>( lines.size() ), keyLine = -1;
+	std::string current;
+	for ( size_t i = 0; i < lines.size(); i++ )
+	{
+		const std::string t = Trim( lines[ i ] );
+		if ( !t.empty() && t[ 0 ] == '[' )
+		{
+			const size_t close = t.find( ']' );
+			current = close == std::string::npos ? std::string() : Lower( Trim( t.substr( 1, close - 1 ) ) );
+			if ( sectionStart >= 0 && sectionEnd == static_cast<int>( lines.size() ) )
+				sectionEnd = static_cast<int>( i );
+			if ( current == wantSection && sectionStart < 0 )
+				sectionStart = static_cast<int>( i );
+			continue;
+		}
+
+		if ( current == wantSection && sectionEnd == static_cast<int>( lines.size() ) && keyLine < 0 && !t.empty() && t[ 0 ] != ';' && t[ 0 ] != '#' )
+		{
+			const size_t eq = t.find( '=' );
+			if ( eq != std::string::npos && Lower( Trim( t.substr( 0, eq ) ) ) == wantKey )
+				keyLine = static_cast<int>( i );
+		}
+	}
+
+	if ( keyLine >= 0 )
+	{
+		lines[ keyLine ] = newLine;
+	}
+	else if ( sectionStart >= 0 )
+	{
+		int at = sectionEnd;
+		while ( at > sectionStart + 1 && Trim( lines[ at - 1 ] ).empty() )
+			at--;
+		lines.insert( lines.begin() + at, newLine );
+	}
+	else
+	{
+		if ( !lines.empty() && !Trim( lines.back() ).empty() )
+			lines.push_back( std::string() );
+		lines.push_back( "[" + section + "]" );
+		lines.push_back( newLine );
+	}
+
+	std::string out;
+	for ( const std::string &l : lines )
+		out += l + ( crlf ? "\r\n" : "\n" );
+
+	FILE *f = std::fopen( path.c_str(), "wb" );
+	if ( f == nullptr )
+		return false;
+	const bool ok = std::fwrite( out.data(), 1, out.size(), f ) == out.size();
+	std::fclose( f );
+	return ok;
+}
+
 const SigOverride *SigConfig::Find( const std::string &arch, const std::string &name ) const
 {
 	auto it = overrides_.find( Lower( arch ) + "." + Lower( name ) );
@@ -721,6 +826,11 @@ std::string DefaultSigConfigTemplate()
 {
 	return
 		"; NetHook2Two configuration.\r\n"
+		";\r\n"
+		"[general]\r\n"
+		"; Also write the classic nethook\\<time>\\*.bin dump files (File > Also write dump files to disk).\r\n"
+		"DumpToDisk = 1\r\n"
+		"\r\n"
 		";\r\n"
 		"; NetHook2Two finds the functions it hooks in steamclient(64).dll with signatures, and for RecvPkt also by\r\n"
 		"; looking at the code that uses its name. If a Steam update breaks one of them and a newer NetHook2Two isn't\r\n"

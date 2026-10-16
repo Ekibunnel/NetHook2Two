@@ -52,6 +52,7 @@ private:
 extern PacketQueue g_packetQueue;
 extern LogBuffer g_logBuffer;
 extern std::atomic<bool> g_dumpToDisk;   // also write the classic nethook/<time>/*.bin files
+extern std::string g_cfgPath;              // <steam>\nethook\nethook2two_cfg.ini (empty until known)
 extern std::atomic<bool> g_quitRequested; // set to unload NetHook2Two
 
 inline void RequestShutdown() { g_quitRequested = true; }
